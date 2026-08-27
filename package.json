@@ -15,16 +15,21 @@
     "zellij"
   ],
   "bugs": {
-    "url": "https://github.com/normful/pi-bakery/issues"
+    "url": "https://github.com/marcoscale98/pi-auto-name/issues"
   },
   "license": "MIT",
   "author": "Norman Sue",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/normful/pi-bakery.git",
-    "directory": "packages/pi-auto-name"
+    "url": "git+https://github.com/marcoscale98/pi-auto-name.git"
   },
   "type": "module",
+  "scripts": {
+    "test": "vp test",
+    "typecheck": "tsc",
+    "lint": "vp check",
+    "lint:fix": "vp check --fix"
+  },
   "dependencies": {
     "@juicesharp/rpiv-config": "2.3.1",
     "typebox": "1.1.38"
