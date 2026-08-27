@@ -9,9 +9,11 @@
 > [normful/pi-bakery#4](https://github.com/normful/pi-bakery/pull/4) (global config in Pi's agent directory)
 > and [normful/pi-bakery#5](https://github.com/normful/pi-bakery/pull/5) (non-blocking `first-agent-settled` naming).
 > Once they are merged upstream, prefer the upstream package.
-
-> [!TIP]
-> Documentation in: [简体中文](./README.zh.md) · [繁體中文](./README.zh-hant.md) · [日本語](./README.ja.md) · [한국어](./README.ko.md) · [Português](./README.pt-br.md) · [Español](./README.es.md) · [Deutsch](./README.de.md) · [Français](./README.fr.md) · [Bahasa Indonesia](./README.id.md) · [Tiếng Việt](./README.vi.md) · [Türkçe](./README.tr.md) · [Polski](./README.pl.md) · [Українська](./README.uk.md) · [فارسی](./README.fa.md) · [العربية](./README.ar.md) · [हिन्दी](./README.hi.md) · [Italiano](./README.it.md) · [Nederlands](./README.nl.md) · [ไทย](./README.th.md)
+>
+> The translated READMEs were dropped here to keep the fork small; they are still in
+> [upstream](https://github.com/normful/pi-bakery/tree/main/packages/pi-auto-name).
+> This only affects documentation: the naming output language is unchanged and still
+> covers every locale in `src/locales.ts`.
 
 Automatically names your Pi session and terminal multiplexer surfaces from the conversation.
 
