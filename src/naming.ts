@@ -37,18 +37,10 @@ export interface NamingSession {
   signal: AbortSignal | undefined;
 }
 
-// Lazy, cached dynamic imports: the heavy external packages (pi-ai,
-// rpiv-config) are only loaded on the first call site that needs them —
-// i.e. during an actual naming run — not at extension load. Both getters
-// cache the import promise, so repeated requests share one resolved module.
+// Import pi-ai only when generating a name, and cache the import across runs.
 let _piAi: Promise<typeof import("@earendil-works/pi-ai")> | undefined;
 function piAi(): Promise<typeof import("@earendil-works/pi-ai")> {
   return (_piAi ??= import("@earendil-works/pi-ai"));
-}
-
-let _rpivConfig: Promise<typeof import("@juicesharp/rpiv-config")> | undefined;
-function rpivConfig(): Promise<typeof import("@juicesharp/rpiv-config")> {
-  return (_rpivConfig ??= import("@juicesharp/rpiv-config"));
 }
 
 export const RETRIES = 3;
@@ -246,14 +238,16 @@ async function resolveModel(
   currentModel: Model<Api> | undefined,
   cfg: Config,
 ) {
-  let parsed: { provider: string; modelId: string } | undefined;
   if (cfg.namingModel) {
-    const { parseModelKey } = await rpivConfig();
-    parsed = parseModelKey(cfg.namingModel);
-  }
-  if (parsed) {
-    const model = modelRegistry.find(parsed.provider, parsed.modelId);
-    if (model) return model;
+    const slash = cfg.namingModel.indexOf("/");
+    const separator = slash >= 1 ? slash : cfg.namingModel.indexOf(":");
+    if (separator >= 1) {
+      const model = modelRegistry.find(
+        cfg.namingModel.slice(0, separator),
+        cfg.namingModel.slice(separator + 1),
+      );
+      if (model) return model;
+    }
   }
   return currentModel; // may be undefined → missing_model
 }

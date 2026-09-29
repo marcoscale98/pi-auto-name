@@ -1,12 +1,10 @@
 // config.ts — schema, defaults, load/merge.
-import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { isAbsolute, join } from "node:path";
 import { Type, type Static, type TObject } from "typebox";
+import { Value } from "typebox/value";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
-import {
-  configPath,
-  loadJsonConfig,
-  validateConfig as rpivValidateConfig,
-} from "@juicesharp/rpiv-config";
 import { debug } from "./debug.js";
 
 export const ConfigSchema = Type.Object({
@@ -58,19 +56,41 @@ export const ConfigSchema = Type.Object({
 
 export type Config = Static<typeof ConfigSchema>;
 
-/**
- * rpiv-config's `validateConfig` (verbatim behavior: non-object guard,
- * Value.Clean strips unknown keys, Value.Create applies defaults, defaults
- * merged under the cleaned value). The cast papers over an upstream generic
- * bug: typebox 1.x's bare `TObject` defaults `required` to `[string]`, so
- * rpiv-config's `T extends TObject` constraint rejects any object schema with
- * more than one required key. Runtime behavior is unchanged.
- */
+/** Apply schema defaults and discard unknown keys, preserving the previous fail-soft behavior. */
 export function validateConfig<T extends TObject>(schema: T, value: unknown): Static<T> {
-  return rpivValidateConfig(schema as TObject, value) as Static<T>;
+  try {
+    if (!isPlainObject(value)) return {} as Static<T>;
+    const cleaned = Value.Clean(schema, Value.Clone(value));
+    return {
+      ...(Value.Create(schema) as Record<string, unknown>),
+      ...(cleaned as Record<string, unknown>),
+    } as Static<T>;
+  } catch {
+    return {} as Static<T>;
+  }
 }
 
-const LEGACY_USER_CONFIG_PATH = configPath("pi-auto-name");
+function loadJsonConfig(path: string): Record<string, unknown> {
+  if (!existsSync(path)) return {};
+  try {
+    const value: unknown = JSON.parse(readFileSync(path, "utf-8"));
+    return isPlainObject(value) ? value : {};
+  } catch (error) {
+    console.warn(`pi-auto-name: invalid JSON at ${path}, using defaults — ${String(error)}`);
+    return {};
+  }
+}
+
+function legacyConfigPath(): string {
+  const xdg = process.env.XDG_CONFIG_HOME?.trim();
+  const expanded =
+    xdg === "~" ? homedir() : xdg?.startsWith("~/") ? join(homedir(), xdg.slice(2)) : xdg;
+  return join(
+    expanded && isAbsolute(expanded) ? expanded : join(homedir(), ".config"),
+    "pi-auto-name",
+    "config.json",
+  );
+}
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -94,22 +114,18 @@ function deepMerge(
 
 /**
  * Load: legacy user base ← Pi user config ← project override (per-field, right wins).
- * Configuration comes only from the three JSON files read via rpiv-config;
- * there are no env-var overrides.
+ * XDG_CONFIG_HOME only selects the location of the legacy config file.
  */
 export function loadConfig(cwd: string): Config {
-  const legacyUserPath = LEGACY_USER_CONFIG_PATH;
+  const legacyUserPath = legacyConfigPath();
   const userPath = join(getAgentDir(), "pi-auto-name.json");
   const projectPath = join(cwd, CONFIG_DIR_NAME, "pi-auto-name.json");
-  const legacyUser = loadJsonConfig<Record<string, unknown>>(legacyUserPath);
-  const user = loadJsonConfig<Record<string, unknown>>(userPath);
-  const project = loadJsonConfig<Record<string, unknown>>(projectPath);
+  const legacyUser = loadJsonConfig(legacyUserPath);
+  const user = loadJsonConfig(userPath);
+  const project = loadJsonConfig(projectPath);
   const merged = deepMerge(deepMerge(legacyUser, user), project);
   const validated = validateConfig(ConfigSchema, merged);
-  // rpiv-config's merge is shallow (`{...defaults, ...cleaned}`) and TypeBox
-  // Value.Create honors an object's own default over nested property defaults.
-  // Deep-merge the full schema defaults so a partial `surfaces`
-  // override keeps every untouched field (spec §3.2 intent).
+  // Value.Create's nested defaults need a deep merge for partial surfaces overrides.
   const fullDefaults = validateConfig(ConfigSchema, {});
   const cfg = deepMerge(fullDefaults, validated) as Config;
   debug("loadConfig", {

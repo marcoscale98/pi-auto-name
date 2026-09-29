@@ -1,24 +1,14 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { ConfigSchema, loadConfig, validateConfig, type Config } from "../src/config.js";
 
 vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@earendil-works/pi-coding-agent")>();
-  return {
-    ...actual,
-    getAgentDir: vi.fn(() => "/fake/home/.pi/agent"),
-  };
+  return { ...actual, getAgentDir: vi.fn() };
 });
-
-vi.mock("@juicesharp/rpiv-config", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@juicesharp/rpiv-config")>();
-  return {
-    ...actual,
-    configPath: vi.fn(() => "/fake/home/.config/pi-auto-name/config.json"),
-    loadJsonConfig: vi.fn(() => ({})),
-  };
-});
-
-import { loadJsonConfig } from "@juicesharp/rpiv-config";
 
 const TOP_LEVEL_DEFAULTS: Partial<Config> = {
   enabled: true,
@@ -35,7 +25,31 @@ const TOP_LEVEL_DEFAULTS: Partial<Config> = {
   sessionNameMaxLength: undefined,
 };
 
-describe("ConfigSchema top-level defaults (via rpiv-config validateConfig)", () => {
+let root: string;
+let originalXdg: string | undefined;
+const project = () => join(root, "project");
+const legacy = () => join(root, "xdg", "pi-auto-name", "config.json");
+const user = () => join(root, "agent", "pi-auto-name.json");
+const projectConfig = () => join(project(), ".pi", "pi-auto-name.json");
+function save(path: string, data: unknown) {
+  mkdirSync(join(path, ".."), { recursive: true });
+  writeFileSync(path, JSON.stringify(data));
+}
+
+beforeEach(() => {
+  root = mkdtempSync(join(tmpdir(), "pi-auto-name-config-"));
+  originalXdg = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = join(root, "xdg");
+  vi.mocked(getAgentDir).mockReturnValue(join(root, "agent"));
+});
+
+afterEach(() => {
+  if (originalXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+  else process.env.XDG_CONFIG_HOME = originalXdg;
+  rmSync(root, { recursive: true, force: true });
+});
+
+describe("ConfigSchema defaults", () => {
   it("applies every scalar default", () => {
     const cfg = validateConfig(ConfigSchema, {});
     for (const [key, value] of Object.entries(TOP_LEVEL_DEFAULTS)) {
@@ -60,7 +74,7 @@ describe("ConfigSchema top-level defaults (via rpiv-config validateConfig)", () 
     expect(cfg.windowNameMaxLength).toBe(25);
   });
 
-  it("strips unknown keys (rpiv-config Value.Clean contract)", () => {
+  it("strips unknown keys", () => {
     const cfg = validateConfig(ConfigSchema, { bogusKey: 1 } as any);
     expect((cfg as any).bogusKey).toBeUndefined();
     expect(cfg.namingStyle).toBe("natural");
@@ -68,13 +82,8 @@ describe("ConfigSchema top-level defaults (via rpiv-config validateConfig)", () 
 });
 
 describe("loadConfig (nested defaults deep-merged)", () => {
-  beforeEach(() => {
-    vi.mocked(loadJsonConfig).mockReset();
-    vi.mocked(loadJsonConfig).mockReturnValue({});
-  });
-
   it("returns full defaults including nested surfaces", () => {
-    const cfg = loadConfig("/p");
+    const cfg = loadConfig(project());
     expect(cfg.surfaces).toEqual({
       renamePiSession: true,
       renameHerdrPane: true,
@@ -89,57 +98,51 @@ describe("loadConfig (nested defaults deep-merged)", () => {
   });
 
   it("keeps untouched surfaces when a partial surfaces override is given", () => {
-    vi.mocked(loadJsonConfig)
-      .mockReturnValueOnce({})
-      .mockReturnValueOnce({ surfaces: { renameTmuxWindow: false } });
-    const cfg = loadConfig("/p");
+    save(user(), { surfaces: { renameTmuxWindow: false } });
+    const cfg = loadConfig(project());
     expect(cfg.surfaces.renameTmuxWindow).toBe(false);
     expect(cfg.surfaces.renamePiSession).toBe(true);
     expect(cfg.surfaces.renameZellijTab).toBe(true);
   });
 
   it("loads the preferred user-global config from Pi's agent directory", () => {
-    vi.mocked(loadJsonConfig)
-      .mockReturnValueOnce({}) // legacy fallback
-      .mockReturnValueOnce({ namingStyle: "slug" }) // preferred user config
-      .mockReturnValueOnce({}); // project override
-    const cfg = loadConfig("/some/project");
-
-    expect(loadJsonConfig).toHaveBeenCalledTimes(3);
-    expect(loadJsonConfig).toHaveBeenNthCalledWith(
-      1,
-      "/fake/home/.config/pi-auto-name/config.json",
-    );
-    expect(loadJsonConfig).toHaveBeenNthCalledWith(2, "/fake/home/.pi/agent/pi-auto-name.json");
-    expect(loadJsonConfig).toHaveBeenNthCalledWith(3, "/some/project/.pi/pi-auto-name.json");
-    expect(cfg.namingStyle).toBe("slug");
+    save(user(), { namingStyle: "slug" });
+    expect(loadConfig(project()).namingStyle).toBe("slug");
+    expect(JSON.parse(readFileSync(user(), "utf-8"))).toEqual({ namingStyle: "slug" });
   });
 
   it("applies legacy, preferred user, and project precedence per field", () => {
-    vi.mocked(loadJsonConfig)
-      .mockReturnValueOnce({
-        namingStyle: "slug",
-        language: "fr",
-        reRenameEveryNTurns: 1,
-      })
-      .mockReturnValueOnce({ language: "de", reRenameEveryNTurns: 2 })
-      .mockReturnValueOnce({ reRenameEveryNTurns: 3 });
-    const cfg = loadConfig("/p");
-
-    expect(cfg.namingStyle).toBe("slug"); // legacy fallback
-    expect(cfg.language).toBe("de"); // preferred user config wins over legacy
-    expect(cfg.reRenameEveryNTurns).toBe(3); // project wins over both user sources
+    save(legacy(), { namingStyle: "slug", language: "fr", reRenameEveryNTurns: 1 });
+    save(user(), { language: "de", reRenameEveryNTurns: 2 });
+    save(projectConfig(), { reRenameEveryNTurns: 3 });
+    const cfg = loadConfig(project());
+    expect(cfg.namingStyle).toBe("slug");
+    expect(cfg.language).toBe("de");
+    expect(cfg.reRenameEveryNTurns).toBe(3);
   });
 
   it("deep-merges nested surface objects across all config sources", () => {
-    vi.mocked(loadJsonConfig)
-      .mockReturnValueOnce({ surfaces: { renameTmuxWindow: false } })
-      .mockReturnValueOnce({ surfaces: { renameZellijTab: false } })
-      .mockReturnValueOnce({ surfaces: { renamePiSession: false } });
-    const cfg = loadConfig("/p");
-    expect(cfg.surfaces.renameTmuxWindow).toBe(false); // legacy fallback
-    expect(cfg.surfaces.renameZellijTab).toBe(false); // preferred user config
-    expect(cfg.surfaces.renamePiSession).toBe(false); // project override
-    expect(cfg.surfaces.renameHerdrPane).toBe(true); // default elsewhere
+    save(legacy(), { surfaces: { renameTmuxWindow: false } });
+    save(user(), { surfaces: { renameZellijTab: false } });
+    save(projectConfig(), { surfaces: { renamePiSession: false } });
+    const cfg = loadConfig(project());
+    expect(cfg.surfaces.renameTmuxWindow).toBe(false);
+    expect(cfg.surfaces.renameZellijTab).toBe(false);
+    expect(cfg.surfaces.renamePiSession).toBe(false);
+    expect(cfg.surfaces.renameHerdrPane).toBe(true);
+  });
+
+  it("ignores missing, malformed, and non-object JSON", () => {
+    save(legacy(), ["not a config"]);
+    save(user(), { namingStyle: "slug" });
+    mkdirSync(join(project(), ".pi"), { recursive: true });
+    writeFileSync(projectConfig(), "{invalid");
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(loadConfig(project()).namingStyle).toBe("slug");
+      expect(warning).toHaveBeenCalledOnce();
+    } finally {
+      warning.mockRestore();
+    }
   });
 });
