@@ -1,6 +1,6 @@
 {
   "name": "@normful/pi-auto-name",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "private": false,
   "description": "Auto-generates names in your language for Pi sessions, tmux windows, herder panes/tabs, zellij panes/tabs so you can easily view what each Pi is doing",
   "keywords": [
@@ -31,8 +31,7 @@
     "lint:fix": "vp check --fix"
   },
   "dependencies": {
-    "@juicesharp/rpiv-config": "2.3.1",
-    "typebox": "1.1.38"
+    "@juicesharp/rpiv-config": "2.3.1"
   },
   "devDependencies": {
     "typescript": "7.0.2",
@@ -42,7 +41,8 @@
     "@earendil-works/pi-agent-core": "*",
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-tui": "*"
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
   },
   "pi": {
     "extensions": [
