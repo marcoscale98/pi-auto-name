@@ -304,9 +304,9 @@ export function sanitizeSessionName(
       return s ? truncateToMax(s, maxChars) : undefined;
     }
     case "natural": {
-      const t = normalizeTitle(raw, maxChars);
+      const t = normalizeTitle(raw, Math.max(maxChars, raw.length));
       // The temporary-title flow owns ISO timestamps; treat them as "no title".
-      return ISO_FALLBACK_RE.test(t) ? undefined : t;
+      return ISO_FALLBACK_RE.test(t) ? undefined : truncateToMax(t, maxChars);
     }
     case "topic-project": {
       return cleanTitle(raw, maxChars) ?? undefined;

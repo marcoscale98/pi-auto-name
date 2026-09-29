@@ -239,6 +239,12 @@ describe("sanitizeSessionName", () => {
     );
   });
 
+  it("natural: keeps a useful session name when the model exceeds a short budget", () => {
+    expect(
+      sanitizeSessionName("natural", "Confermare Integrazione Nomi Sessione E Etichette Herdr", 35),
+    ).toBe("Confermare Integrazione Nomi Sessio");
+  });
+
   it("natural: rejects bare ISO timestamps (temporary-title flow owns them)", () => {
     expect(sanitizeSessionName("natural", "2026-01-05T09:30:00.000Z", 96)).toBeUndefined();
   });
