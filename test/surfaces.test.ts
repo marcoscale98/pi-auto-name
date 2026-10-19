@@ -61,7 +61,7 @@ function mkState(): RenameState {
 
 /** Queue of exec responses; each entry is matched by command + args prefix. */
 function mkPi(execImpl: (command: string, args: string[]) => Promise<unknown> | unknown) {
-  const exec = vi.fn(async (command: string, args: string[], options?: any) => {
+  const exec = vi.fn(async (command: string, args: string[]) => {
     const result = await execImpl(command, args);
     return typeof result === "string"
       ? { stdout: result, stderr: "", code: 0, killed: false }
@@ -99,16 +99,16 @@ describe("applySessionName", () => {
   it("sets the session name and records provenance with the stored name", async () => {
     const { pi, setSessionName, getSessionName, appendEntry } = mkPi(() => {});
     const state = mkState();
-    await applySessionName(pi, state, mkConfig(), "new-session", "New Window");
+    await applySessionName(pi, state, mkConfig(), "new-session");
 
     expect(setSessionName).toHaveBeenCalledWith("new-session");
     expect(getSessionName).toHaveBeenCalled();
     expect(state.lastAutoName).toBe("stored-session"); // stored (normalized) name wins
-    expect(state.lastAutoWindowName).toBe("New Window");
+    expect(state.lastAutoWindowName).toBe("new-session");
     const [customType, data] = appendEntry.mock.calls[0];
     expect(customType).toBe(ENTRY_TYPE);
     expect(data.sessionName).toBe("stored-session");
-    expect(data.windowName).toBe("New Window");
+    expect(data.windowName).toBe("new-session");
   });
 
   it("falls back to the requested name when getSessionName is undefined", async () => {
@@ -126,11 +126,11 @@ describe("applySessionName", () => {
     const seenAtSet: (string | undefined)[] = [];
     const state = mkState();
     const pi = {
-      setSessionName: vi.fn((name: string) => seenAtSet.push(state.lastAutoName)),
+      setSessionName: vi.fn((_name: string) => seenAtSet.push(state.lastAutoName)),
       getSessionName: vi.fn(() => "stored-session"),
       appendEntry: vi.fn(),
     } as any;
-    await applySessionName(pi, state, mkConfig(), "new-session", "New Window");
+    await applySessionName(pi, state, mkConfig(), "new-session");
     // A synchronous session_info_changed echo fired inside setSessionName would
     // read lastAutoName at this moment — it must already be our new name.
     expect(seenAtSet[0]).toBe("new-session");
@@ -144,7 +144,6 @@ describe("applySessionName", () => {
       state,
       mkConfig({ surfaces: { renamePiSession: false } }),
       "new-session",
-      "Win",
     );
 
     expect(setSessionName).not.toHaveBeenCalled();
@@ -283,7 +282,7 @@ describe("surfaces absent (no env)", () => {
     vi.resetModules();
     const fresh = await import("../src/surfaces.js");
 
-    const exec = vi.fn(async (command: string, args: string[]) => ({
+    const exec = vi.fn(async (_command: string, _args: string[]) => ({
       stdout: "",
       stderr: "",
       code: 0,

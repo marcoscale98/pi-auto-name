@@ -1,11 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import {
-  ENTRY_TYPE,
-  createState,
-  recordAutoRename,
-  restoreProvenance,
-  type RenameState,
-} from "../src/state.js";
+import { ENTRY_TYPE, createState, recordAutoRename, restoreProvenance } from "../src/state.js";
 
 describe("createState", () => {
   it("initializes every field to its default", () => {

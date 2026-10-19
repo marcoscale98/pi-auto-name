@@ -328,11 +328,11 @@ describe("buildProjectSuffixTitle", () => {
     expect(buildProjectSuffixTitle("", "pi-bakery", sep, 24)).toBe("pi-bakery");
   });
 
-  it("tails the project when the suffix alone exceeds maxChars", () => {
-    expect(buildProjectSuffixTitle("x", "verylongprojectname", sep, 5)).toBe("tname");
+  it("trims the project suffix at a word boundary when it exceeds maxChars", () => {
+    expect(buildProjectSuffixTitle("x", "verylongprojectname", sep, 5)).toBe("veryl");
   });
 
-  it("truncates the topic to leave room for the suffix", () => {
+  it("trims the topic to leave room for the suffix", () => {
     expect(buildProjectSuffixTitle("aaaa", "bb", sep, 4)).toBe("a｜bb");
   });
 

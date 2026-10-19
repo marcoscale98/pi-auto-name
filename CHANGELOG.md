@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Breaking:** naming now generates one title, limited by `titleMaxLength` (default 30), and applies that title to the Pi session and every enabled terminal surface. The old `windowNameMaxLength` and `sessionNameMaxLength` settings are ignored.
 - Global configuration now prefers `getAgentDir()/pi-auto-name.json`, so it follows `PI_CODING_AGENT_DIR` and stays alongside other Pi configuration.
 
 ### Deprecated

@@ -1,4 +1,4 @@
-// naming.ts — style prompts, dual-name (WINDOW/SESSION) LLM call, fallback chain.
+// naming.ts — style prompts, single-title LLM call, fallback chain.
 import { basename } from "node:path";
 import type {
   Api,
@@ -12,15 +12,11 @@ import type { Config } from "./config.js";
 import type { NamingContext } from "./context.js";
 import { buildLocale, fill, normalizeLanguageTag, type LocaleStrings } from "./i18n.js";
 import {
-  ISO_FALLBACK_RE,
-  WINDOW_WORD_MIN,
   buildProjectSuffixTitle,
   cleanTitle,
-  compactWindowName,
-  normalizeTitle,
   sanitizeSlug,
   topicWithoutProject,
-  truncateToMax,
+  truncateToWordBoundary,
 } from "./sanitize.js";
 import { debug, debugEnabled } from "./debug.js";
 
@@ -46,25 +42,11 @@ function piAi(): Promise<typeof import("@earendil-works/pi-ai")> {
 export const RETRIES = 3;
 export const UI_RENAME_TIMEOUT_MS = 10_000; // fire-and-forget UI budget (§11)
 
-/** Fixed default window-name limit for any style, when no override is configured. */
-export const DEFAULT_MAX_WINDOW_NAME_CHARS = 30;
-/** Fixed default session-name limit for any style, when no override is configured. */
-export const DEFAULT_MAX_SESSION_NAME_CHARS = 200;
+/** Default title limit for every enabled Pi and terminal surface. */
+export const DEFAULT_MAX_TITLE_CHARS = 30;
 
-/**
- * Effective window-name limit: `cfg.windowNameMaxLength` if set, else
- * DEFAULT_MAX_WINDOW_NAME_CHARS. The same limit applies to every style.
- */
-export function windowNameBudget(cfg: Config): number {
-  return cfg.windowNameMaxLength ?? DEFAULT_MAX_WINDOW_NAME_CHARS;
-}
-
-/**
- * Effective session-name limit: `cfg.sessionNameMaxLength` if set, else
- * DEFAULT_MAX_SESSION_NAME_CHARS. The same limit applies to every style.
- */
-export function sessionNameBudget(cfg: Config): number {
-  return cfg.sessionNameMaxLength ?? DEFAULT_MAX_SESSION_NAME_CHARS;
+export function titleBudget(cfg: Config): number {
+  return cfg.titleMaxLength ?? DEFAULT_MAX_TITLE_CHARS;
 }
 
 function buildTopicProjectPrompt(input: {
@@ -81,7 +63,7 @@ function buildTopicProjectPrompt(input: {
   const { locale } = input;
   return fill(locale.topicProjectPromptTemplate, {
     language: input.language,
-    maxChars: input.maxChars,
+    titleMaxChars: input.maxChars,
     projectLines: input.projectName
       ? fill(locale.projectSuffixLines, {
           separator: input.separator,
@@ -103,10 +85,7 @@ function buildTopicProjectPrompt(input: {
 }
 
 function systemPromptFor(style: Config["namingStyle"], locale: LocaleStrings, cfg: Config): string {
-  const lengthVariables = {
-    windowMaxChars: windowNameBudget(cfg),
-    sessionMaxChars: sessionNameBudget(cfg),
-  };
+  const lengthVariables = { titleMaxChars: titleBudget(cfg) };
   let base: string;
   switch (style) {
     case "slug":
@@ -119,11 +98,9 @@ function systemPromptFor(style: Config["namingStyle"], locale: LocaleStrings, cf
       base = fill(locale.naturalSystemPrompt, lengthVariables);
       break;
   }
-  // topic-project declares the language in its user template (`Language:
-  // {language}`); the natural/slug scaffolding is written in the target
-  // language but never names it, so inject an explicit directive — otherwise
-  // English-biased naming models default to English output regardless of the
-  // configured `language`.
+  // topic-project declares the language in its user template; natural/slug
+  // prompts also receive an explicit directive so English-biased models honor
+  // the configured output language.
   if (style === "natural" || style === "slug") {
     const directive = fill(locale.languageDirective, {
       language: normalizeLanguageTag(cfg.language),
@@ -202,7 +179,7 @@ function renderPrompt(
         firstAssistantMessage: context.firstAssistantMessage,
         conversation: context.fullText,
         separator: "｜",
-        maxChars: sessionNameBudget(cfg),
+        maxChars: titleBudget(cfg),
         language,
         locale,
       }) +
@@ -220,10 +197,7 @@ function renderPrompt(
   const extra = context.fullText
     ? fill(locale.conversationSection, { conversation: context.fullText })
     : "";
-  const rules = fill(locale.naturalRules, {
-    windowMaxChars: windowNameBudget(cfg),
-    sessionMaxChars: sessionNameBudget(cfg),
-  });
+  const rules = fill(locale.naturalRules, { titleMaxChars: titleBudget(cfg) });
 
   // Reinforce the output language in the user turn too — weak models attend to
   // the user message far more than the system prompt, so repeat the directive
@@ -252,75 +226,33 @@ async function resolveModel(
   return currentModel; // may be undefined → missing_model
 }
 
-/**
- * The compact surface label (herdr pane/tab, tmux window, zellij pane/tab),
- * sanitized for the active style. `maxChars` is the enforced budget — callers
- * compute it via `windowNameBudget`. Returns undefined when the value compacts
- * to nothing usable → the caller retries (invalid output).
- */
-export function sanitizeWindowName(
+/** Sanitize one generated title for every enabled surface. */
+export function sanitizeTitle(
   style: Config["namingStyle"],
   raw: string,
   maxChars: number,
   cwd: string,
 ): string | undefined {
-  switch (style) {
-    case "natural": {
-      // 2-4 whole words, dropped to fit maxChars; undefined below the word
-      // floor → invalid output, retry.
-      return compactWindowName(raw, WINDOW_WORD_MIN, maxChars) || undefined;
-    }
-    case "slug": {
-      const s = sanitizeSlug(raw);
-      return s ? truncateToMax(s, maxChars) : undefined;
-    }
-    case "topic-project": {
-      const projectName = basename(cwd).trim();
-      const topic = cleanTitle(raw, maxChars) ?? "";
-      if (!topic && !projectName) return undefined;
-      return buildProjectSuffixTitle(
-        topicWithoutProject(topic, projectName, "｜"),
-        projectName,
-        "｜",
-        maxChars,
-      );
-    }
+  if (!raw.trim()) return undefined;
+  if (style === "slug") {
+    const title = sanitizeSlug(raw);
+    return title ? truncateToWordBoundary(title, maxChars) || undefined : undefined;
   }
-}
-
-/**
- * The session name (Pi session + session list), sanitized for the active
- * style. `maxChars` is the enforced budget — callers compute it via
- * `sessionNameBudget`.
- */
-export function sanitizeSessionName(
-  style: Config["namingStyle"],
-  raw: string,
-  maxChars: number,
-): string | undefined {
-  switch (style) {
-    case "slug": {
-      const s = sanitizeSlug(raw);
-      return s ? truncateToMax(s, maxChars) : undefined;
-    }
-    case "natural": {
-      const t = normalizeTitle(raw, Math.max(maxChars, raw.length));
-      // The temporary-title flow owns ISO timestamps; treat them as "no title".
-      return ISO_FALLBACK_RE.test(t) ? undefined : truncateToMax(t, maxChars);
-    }
-    case "topic-project": {
-      return cleanTitle(raw, maxChars) ?? undefined;
-    }
+  if (style === "topic-project") {
+    const projectName = basename(cwd).trim();
+    const topic = cleanTitle(raw, Number.POSITIVE_INFINITY) ?? "";
+    if (!topic && !projectName) return undefined;
+    return buildProjectSuffixTitle(
+      topicWithoutProject(topic, projectName, "｜"),
+      projectName,
+      "｜",
+      maxChars,
+    );
   }
+  return cleanTitle(raw, maxChars) ?? undefined;
 }
 
-/** The two names produced by a single naming call. */
-export interface GeneratedNames {
-  windowName: string;
-  sessionName: string;
-}
-
-/** Why name generation failed. */
+/** Why title generation failed. */
 export type GenerateFailureReason =
   | "missing_prompt"
   | "missing_model"
@@ -329,7 +261,7 @@ export type GenerateFailureReason =
   | "invalid_output";
 
 export type GenerateNamesResult =
-  | { ok: true; names: GeneratedNames }
+  | { ok: true; title: string }
   | { ok: false; reason: GenerateFailureReason };
 
 /**
@@ -342,47 +274,42 @@ export const ENVIRONMENTAL_FAILURES: ReadonlySet<GenerateFailureReason> = new Se
   "missing_auth",
 ]);
 
-/** A leading `window:` label at the line start. */
-const WINDOW_LABEL_RE = /^window\s*:\s*(.*)$/i;
-/** A leading `session:` label at the line start. */
-const SESSION_LABEL_RE = /^session\s*:\s*(.*)$/i;
-/** Surrounding quotes/whitespace on a generated value. */
-const GENERATED_VALUE_QUOTES_RE = /^[\s"'`]+|[\s"'`]+$/g;
-
-function cleanGeneratedValue(value: string): string {
-  return value.replace(GENERATED_VALUE_QUOTES_RE, "").trim();
-}
+/**
+ * Optional current and legacy labels accepted from the model. A colon or a
+ * spaced dash marks a label in any case; a bare space only counts for the
+ * all-caps form (`WINDOW Pi Auto Name`), so titles such as "Session Manager
+ * Refactor" or "Session-Based Auth" keep their first word.
+ */
+const TITLE_LABEL_RE = /^(?:title|window|session)(?:\s*[:：]\s*|\s+[-–—]\s+)(.*)$/iu;
+const CAPS_TITLE_LABEL_RE = /^(?:TITLE|WINDOW|SESSION)\s+(.*)$/u;
+const LEADING_OUTPUT_NOISE_RE = /^[\s>*_~`"'“‘「『【（\-•]+/u;
+const LEADING_OUTPUT_LIST_RE = /^\d+[.)]\s*/u;
+const TRAILING_OUTPUT_NOISE_RE = /[`"'”’」』】）*_~\s.,!?;:，。！？；：、…؟]+$/u;
 
 /**
- * Parse the two labeled lines. Anchored at the line start so a "session:"
- * appearing inside a WINDOW value (or "window:" inside a SESSION value) is
- * never misread as the other label. Punctuation inside values is stripped
- * later by the sanitizers.
+ * Take the first usable non-empty model line and remove harmless formatting.
+ * Later lines are ignored: one title is the contract, but old models may still
+ * emit a second bare or legacy-labeled line.
  */
-export function parseGeneratedNames(value: string): {
-  window?: string;
-  session?: string;
-} {
-  const lines = value
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  let windowName: string | undefined;
-  let sessionName: string | undefined;
-
-  for (const line of lines) {
-    if (!windowName) {
-      const windowMatch = line.match(WINDOW_LABEL_RE);
-      if (windowMatch?.[1]) windowName = cleanGeneratedValue(windowMatch[1]);
-    }
-    if (!sessionName) {
-      const sessionMatch = line.match(SESSION_LABEL_RE);
-      if (sessionMatch?.[1]) sessionName = cleanGeneratedValue(sessionMatch[1]);
-    }
-    if (windowName && sessionName) break;
+export function parseGeneratedTitle(value: string): string | undefined {
+  for (const part of value.split(/\r?\n/)) {
+    const line = part.trim();
+    if (!line) continue;
+    const withoutLeadingNoise = line
+      .replace(LEADING_OUTPUT_LIST_RE, "")
+      .replace(LEADING_OUTPUT_NOISE_RE, "")
+      .trim();
+    const labeled =
+      withoutLeadingNoise.match(TITLE_LABEL_RE)?.[1] ??
+      withoutLeadingNoise.match(CAPS_TITLE_LABEL_RE)?.[1] ??
+      withoutLeadingNoise;
+    const title = labeled
+      .replace(LEADING_OUTPUT_NOISE_RE, "")
+      .replace(TRAILING_OUTPUT_NOISE_RE, "")
+      .trim();
+    if (title) return title;
   }
-  return { window: windowName, session: sessionName };
+  return undefined;
 }
 
 /**
@@ -458,7 +385,7 @@ async function completeOnce(
 
 /** The outcome of one generateNames attempt, so the retry loop stays small. */
 type AttemptResult =
-  | { ok: true; names: GeneratedNames }
+  | { ok: true; title: string }
   | { ok: false; kind: "missing_model" }
   | { ok: false; kind: "missing_auth" }
   | { ok: false; kind: "request_failed" }
@@ -565,31 +492,25 @@ async function attemptOnce(
     return { ok: false, kind: "retry" };
   }
 
-  // Step 5: parse + sanitize the output.
-  let windowName: string | undefined;
-  let sessionName: string | undefined;
+  // Step 5: parse + sanitize the single title.
+  let title: string | undefined;
   try {
     const raw = response.content
       .filter((b): b is { type: "text"; text: string } => b.type === "text")
       .map((b) => b.text)
-      .join("\n")
-      .trim();
-    const parsed = parseGeneratedNames(raw);
-    windowName = sanitizeWindowName(style, parsed.window ?? "", windowNameBudget(cfg), cwd);
-    sessionName = sanitizeSessionName(style, parsed.session ?? "", sessionNameBudget(cfg));
+      .join("\n");
+    const parsed = parseGeneratedTitle(raw);
+    title = parsed ? sanitizeTitle(style, parsed, titleBudget(cfg), cwd) : undefined;
     debug("generateNames: parsed output", {
       raw: raw.slice(0, 120),
-      window: parsed.window,
-      session: parsed.session,
-      sanitized: { windowName, sessionName },
+      parsed,
+      title,
     });
   } catch (error) {
     debug("generateNames: parse/sanitize threw", String(error));
     return { ok: false, kind: "request_failed" };
   }
-  if (windowName && sessionName) {
-    return { ok: true, names: { windowName, sessionName } };
-  }
+  if (title) return { ok: true, title };
   debug("generateNames: invalid output — retrying");
   return { ok: false, kind: "retry" };
 }
@@ -624,7 +545,7 @@ export async function generateNames(
 
   for (let attempt = 0; attempt < RETRIES; attempt++) {
     const res = await attemptOnce(session, cfg, context, titles, cwd, pi, options, attempt, anchor);
-    if (res.ok) return { ok: true, names: res.names };
+    if (res.ok) return { ok: true, title: res.title };
     switch (res.kind) {
       case "missing_model":
         return { ok: false, reason: "missing_model" };
@@ -637,18 +558,11 @@ export async function generateNames(
     }
   }
 
-  // Last-message fallback: sanitize the latest user message into both names.
-  const fallbackWindow = sanitizeWindowName(style, seed, windowNameBudget(cfg), cwd);
-  const fallbackSession = sanitizeSessionName(style, seed, sessionNameBudget(cfg));
-  if (fallbackWindow && fallbackSession) {
-    debug("generateNames: last-message fallback", {
-      fallbackWindow,
-      fallbackSession,
-    });
-    return {
-      ok: true,
-      names: { windowName: fallbackWindow, sessionName: fallbackSession },
-    };
+  // Last-message fallback: apply the same single-title sanitizer and budget.
+  const fallbackTitle = sanitizeTitle(style, seed, titleBudget(cfg), cwd);
+  if (fallbackTitle) {
+    debug("generateNames: last-message fallback", { fallbackTitle });
+    return { ok: true, title: fallbackTitle };
   }
   debug("generateNames: invalid_output — fallback produced nothing usable");
   return { ok: false, reason: "invalid_output" };

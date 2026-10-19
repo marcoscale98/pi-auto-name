@@ -1,5 +1,4 @@
-// surfaces.ts — session name / herdr pane / herdr tab / tmux window / zellij
-// pane / zellij tab.
+// surfaces.ts — one title applied to the Pi session and terminal surfaces.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { Config } from "./config.js";
 import type { RenameState } from "./state.js";
@@ -8,35 +7,30 @@ import { recordAutoRename } from "./state.js";
 import { debug } from "./debug.js";
 
 /**
- * Apply the session name (gated by `renamePiSession`), then record provenance
- * against the stored session name and window name. `lastAutoName`/`
- * lastAutoWindowName` are set BEFORE `setSessionName`: this pi build dispatches
- * the session_info_changed echo synchronously inside the set, so the echo
- * handler must already see `lastAutoName` or it will treat our own rename as
- * external and re-sync surfaces with a compacted window name. recordAutoRename
- * then re-reads the stored (normalized) name so echo equality survives any
- * normalization inside setSessionName. When `renamePiSession` is false, only
- * the herdr/tmux/zellij surfaces receive the window name (via syncSurfaces); no
- * session rename occurs and no provenance is recorded.
+ * Apply the one generated title to the Pi session (when enabled), then record
+ * provenance for resume. `lastAutoName`/`lastAutoWindowName` are set BEFORE
+ * `setSessionName`: this pi build can dispatch the session_info_changed echo
+ * synchronously, so the echo handler must already recognize the new title.
+ * When `renamePiSession` is false, syncSurfaces still applies the same title to
+ * the enabled terminal surfaces and no provenance is recorded.
  */
 export async function applySessionName(
   pi: ExtensionAPI,
   state: RenameState,
   cfg: Config,
-  sessionName: string,
-  windowName?: string,
+  title: string,
 ): Promise<void> {
-  if (!cfg.surfaces.renamePiSession) return; // herdr/tmux/zellij still applied via syncSurfaces
-  state.lastAutoName = sessionName;
-  if (windowName) state.lastAutoWindowName = windowName;
-  pi.setSessionName(sessionName);
-  recordAutoRename(pi, state, pi.getSessionName() ?? sessionName, windowName);
+  if (!cfg.surfaces.renamePiSession) return; // terminal surfaces are applied separately
+  state.lastAutoName = title;
+  state.lastAutoWindowName = title;
+  pi.setSessionName(title);
+  recordAutoRename(pi, state, pi.getSessionName() ?? title, title);
 }
 
 /**
- * The window name to display on non-session surfaces for a given session name:
- * the stored window name when it still matches the current session name (exact
- * restore on resume), else a compacted form of the session name (§4 rule 5).
+ * The title to display on non-session surfaces for a given session title:
+ * the stored legacy surface field when it still matches the current session
+ * title (exact restore on resume), else a compacted form of the session title.
  */
 export function windowNameForSync(
   state: RenameState,
@@ -52,37 +46,36 @@ export function windowNameForSync(
 }
 
 /**
- * Re-apply the window name to every enabled non-session surface.
+ * Re-apply the same title to every enabled non-session surface.
  * The terminal title is intentionally absent: pi formats `Pi - <name> - <cwd>`
- * from the session name on every session_info_changed, so the session-name
- * surface already drives it (§4 rule 5).
+ * from the session title on every session_info_changed.
  */
 export async function syncSurfaces(
   pi: ExtensionAPI,
   cfg: Config,
-  windowName: string | undefined,
+  title: string | undefined,
 ): Promise<void> {
-  if (!windowName) {
-    debug("syncSurfaces: skipped (no window name)");
+  if (!title) {
+    debug("syncSurfaces: skipped (no title)");
     return;
   }
 
   const always = cfg.replaceExistingName === "always";
-  debug("syncSurfaces", { windowName, always });
+  debug("syncSurfaces", { title, always });
   if (cfg.surfaces.renameHerdrPane) {
-    await renameHerdrPane(pi, windowName, always);
+    await renameHerdrPane(pi, title, always);
   }
   if (cfg.surfaces.renameHerdrTab) {
-    await renameHerdrTab(pi, windowName, always);
+    await renameHerdrTab(pi, title, always);
   }
   if (cfg.surfaces.renameTmuxWindow) {
-    await renameTmuxWindow(pi, windowName);
+    await renameTmuxWindow(pi, title);
   }
   if (cfg.surfaces.renameZellijPane) {
-    await renameZellijPane(pi, windowName);
+    await renameZellijPane(pi, title);
   }
   if (cfg.surfaces.renameZellijTab) {
-    await renameZellijTab(pi, windowName);
+    await renameZellijTab(pi, title);
   }
 }
 

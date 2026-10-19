@@ -43,7 +43,8 @@ const WRAPPING_QUOTE_OR_BRACKET_RE = /^["'`\u300C\u300E\uFF08([]+|["'`\u300D\u30
 /** Trailing sentence-ending punctuation: `.` `。` `!` `！` `?` `？`. */
 const TRAILING_SENTENCE_ENDING_PUNCTUATION_RE = /[.\u3002!\uFF01?\uFF1F]+$/g;
 /** Control characters that must be stripped from a line. */
-const CONTROL_CHARS_RE = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g;
+// eslint-disable-next-line no-control-regex -- intentional control-character sanitizer
+const CONTROL_CHARS_RE = new RegExp("[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f]", "gu");
 /** TUI box-drawing / block-element glyphs (herdr borders must not leak into a title). */
 const TUI_BORDER_RE = /[\u2500-\u257f\u2580-\u259f]/;
 /** UTC ISO-8601 timestamp (recognized as the temporary-title fallback). */
@@ -92,7 +93,7 @@ export function cleanTitle(raw: string, maxChars: number): string | null {
   t = t.replace(WHITESPACE_RUN_RE, " ");
   t = t.replace(TRAILING_SENTENCE_ENDING_PUNCTUATION_RE, "");
   if (!t) return null;
-  if (t.length > maxChars) t = truncateToMax(t, maxChars); // code-point safe
+  if (codePointLength(t) > maxChars) t = truncateToWordBoundary(t, maxChars);
   return t.length > 0 ? t : null;
 }
 
@@ -137,6 +138,18 @@ export function codePointLength(value: string): number {
 
 export function truncateToMax(value: string, maxChars: number): string {
   return Array.from(value).slice(0, maxChars).join("").trim();
+}
+
+/** Keep whole whitespace- or hyphen-separated words when possible. */
+export function truncateToWordBoundary(value: string, maxChars: number): string {
+  const chars = Array.from(value.trim());
+  if (chars.length <= maxChars) return chars.join("").trim();
+  if (maxChars <= 0) return "";
+  if (/\s|-/u.test(chars[maxChars])) return chars.slice(0, maxChars).join("").trim();
+  for (let i = Math.min(maxChars, chars.length) - 1; i >= 1; i--) {
+    if (/\s|-/u.test(chars[i])) return chars.slice(0, i).join("").trim();
+  }
+  return chars.slice(0, maxChars).join("").trim();
 }
 
 export function tailToMax(value: string, maxChars: number): string {
@@ -248,10 +261,10 @@ export function buildProjectSuffixTitle(
   const trimmedTopic = topic.trim();
   const suffix = `${separator}${projectName}`;
   const suffixLength = codePointLength(suffix);
-  if (suffixLength > maxChars) return tailToMax(projectName, maxChars);
-  if (!trimmedTopic) return truncateToMax(projectName, maxChars);
+  if (suffixLength > maxChars) return truncateToWordBoundary(projectName, maxChars);
+  if (!trimmedTopic) return truncateToWordBoundary(projectName, maxChars);
   const topicBudget = maxChars - suffixLength;
-  const topicPrefix = truncateToMax(trimmedTopic, topicBudget);
-  if (!topicPrefix) return truncateToMax(projectName, maxChars);
+  const topicPrefix = truncateToWordBoundary(trimmedTopic, topicBudget);
+  if (!topicPrefix) return truncateToWordBoundary(projectName, maxChars);
   return `${topicPrefix}${suffix}`;
 }

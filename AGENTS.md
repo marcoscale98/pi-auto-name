@@ -59,48 +59,41 @@ runs in this order:
 - Every table implements **all 15 `LocaleStrings` fields** as non-empty
   strings.
 - Every `{placeholder}` used by the naming templates is preserved verbatim:
-  `{language} {maxChars} {projectLines} {projectLine} {cwd} {firstUserBlock}
-{firstAssistantBlock}` in `topicProjectPromptTemplate`,
+  `{language} {titleMaxChars} {projectLines} {projectLine} {cwd}
+{firstUserBlock} {firstAssistantBlock}` in `topicProjectPromptTemplate`,
   `{firstUserMessageLabel} {first} {recent}` in `namingContextTemplate`,
-  `{conversation}` in `conversationSection`,
-  `{separator} {projectName}` in `projectSuffixLines`, and
-  `{language}` in `languageDirective`.
-- **The model output contract stays ASCII in every locale**: `responseFormat`
-  and any instructions that name the output lines keep the `WINDOW:` /
-  `SESSION:` labels, because `naming.ts` parses the model reply with the
-  ASCII-anchored `WINDOW_LABEL_RE` / `SESSION_LABEL_RE`. Only the surrounding
-  instruction scaffolding is translated.
-- **Lengths are parametric, not hardcoded.** Every string that states a WINDOW /
-  SESSION size (`naturalSystemPrompt`, `slugSystemPrompt`,
-  `topicProjectSystemPrompt`, `naturalRules`) uses the `{windowMaxChars}` and
-  `{sessionMaxChars}` placeholders instead of literal numbers. `naming.ts`
-  fills them with the effective `windowNameBudget(cfg)` /
-  `sessionNameBudget(cfg)` (from `windowNameMaxLength` / `sessionNameMaxLength`
-  config, falling back to the `DEFAULT_MAX_*_NAME_CHARS` constants), so the
-  model always sees the real enforced budget. Do not substitute literal numbers
-  for these placeholders.
+  `{conversation}` in `conversationSection`, `{separator} {projectName}` in
+  `projectSuffixLines`, and `{language}` in `languageDirective`.
+- **The model output contract is one ASCII-labelled title in every locale.**
+  `responseFormat` asks for `TITLE: <title>` on one line. The parser accepts
+  that label plus `Title -` and legacy `WINDOW:` / `SESSION:` labels, but always
+  uses the first non-empty line. Only the surrounding instruction scaffolding
+  is translated.
+- **Lengths are parametric, not hardcoded.** Every length-bearing prompt field
+  (`naturalSystemPrompt`, `slugSystemPrompt`, `topicProjectSystemPrompt`, and
+  `naturalRules`) uses `{titleMaxChars}`. `naming.ts` fills it from the single
+  `titleMaxLength` config value (default 30), so the model sees the enforced
+  budget for every style. Prompts size titles by characters, not fixed word
+  counts, and tell the model to summarize the work's topic or intent instead of
+  restating or paraphrasing the request.
 - `naturalRules` is newline-joined to exactly 10 lines.
 - **Output language is stated explicitly, not just implied by scaffold
   language.** `languageDirective` is a localized "output in {language}"
   sentence; `naming.ts` injects it at the top of the `natural` and `slug`
-  system prompts so English-biased models still honor the configured `language`.
-  The `topic-project` style does not inject it — its user template already
-  carries its own `Language: {language}` line.
+  system prompts and user turns. The `topic-project` style keeps the directive
+  in its user template (`Language: {language}` or its localized equivalent).
 
 ## Language-specific guidance
 
-- **Word vs character sizing.** English, Brazilian Portuguese, Spanish, German,
-  French, Indonesian, Vietnamese, Turkish, Polish, Ukrainian, Persian, Arabic,
-  Hindi, Italian and Dutch size names in words (`WINDOW` 2-4, `SESSION` 8-12).
-  CJK and Thai have no whitespace word boundaries, so those tables size by
-  character count (`WINDOW` ≈ 4-12, `SESSION` ≈ 15-40). Scripts without
-  upper/lower case (all CJK, Thai, Persian, Arabic, Hindi) drop case ("Title
-  Case" / lowercase) phrasing; scripts with case keep it.
+- **Character sizing.** Every locale sizes the single title by the
+  `{titleMaxChars}` character budget. English, Portuguese, Spanish, German,
+  French, Indonesian, Vietnamese, Turkish, Polish, Ukrainian, Italian and Dutch
+  retain their Title Case or lowercase slug conventions. CJK, Thai, Persian,
+  Arabic and Hindi keep their script-appropriate no-case conventions; CJK and
+  Thai do not assume whitespace word boundaries.
 - **Sanitizers are script-aware.** `sanitize.ts` word tokenizers are
   Unicode-aware (`\p{L}\p{M}\p{N}`), so letters and combining marks in every
-  script — Arabic, Devanagari, Cyrillic, accented Latin, CJK, Thai — are kept
-  as word content instead of being stripped (which used to drop the `natural`
-  WINDOW name to `undefined` → `invalid_output` for non-Latin languages).
-  `CJK_CHARS_SRC` still drives the no-boundary word floor: the `natural`
-  window-name floor drops to 1 when a value contains Han / kana / Hangul /
-  Thai (see `compactWindowName`).
+  script — Arabic, Devanagari, Cyrillic, accented Latin, CJK, and Thai — remain
+  title content. When a title exceeds the budget, whitespace or hyphen-separated
+  words are removed from the end; a single word is hard-cut only when it alone
+  exceeds the budget. The topic-project suffix is included in the same budget.

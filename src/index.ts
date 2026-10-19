@@ -179,7 +179,7 @@ export default function (pi: ExtensionAPI): void {
       return;
     }
 
-    // Step 3: apply the session name (race-guarded).
+    // Step 3: apply the generated title to the Pi session (race-guarded).
     try {
       if (p.state.autoRenameLocked || pi.getSessionName() !== p.state.nameAtGenerationStart) {
         debug("renameOnce: race guard abort — session name changed during generation", {
@@ -190,20 +190,19 @@ export default function (pi: ExtensionAPI): void {
       }
       debug("renameOnce: applying names", {
         previous: currentName,
-        next: result.names.sessionName,
-        changed: currentName !== result.names.sessionName,
-        windowName: result.names.windowName,
+        next: result.title,
+        changed: currentName !== result.title,
       });
-      await applySessionName(pi, p.state, c, result.names.sessionName, result.names.windowName);
+      await applySessionName(pi, p.state, c, result.title);
     } catch (error) {
       debug("renameOnce: applySessionName failed", String(error));
       throw error;
     }
     if (!p.activeSession.active) return;
 
-    // Step 4: sync surfaces to the generated window name.
+    // Step 4: sync every enabled surface to the same generated title.
     try {
-      await syncSurfaces(pi, c, result.names.windowName);
+      await syncSurfaces(pi, c, result.title);
     } catch (error) {
       debug("renameOnce: syncSurfaces failed", String(error));
       throw error;
@@ -282,7 +281,7 @@ export default function (pi: ExtensionAPI): void {
     });
 
     // Respect an existing deliberate name; still sync surfaces to a window
-    // name derived from it (stored window name, else compacted session name).
+    // title derived from it (legacy stored surface title, else a compacted session title).
     const currentName = pi.getSessionName();
     if (currentName && !canReplace(currentName, c.replaceExistingName)) {
       debug("session_start: existing deliberate name — initial rename skipped", { currentName });

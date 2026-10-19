@@ -44,14 +44,7 @@ export const ConfigSchema = Type.Object({
   namingModel: Type.String({ default: "" }),
   // BCP-47 language tag only ("en", "zh-CN", "pt-BR")
   language: Type.String({ default: "en" }),
-  // Per-name limits, override semantics: when set, windowNameMaxLength applies
-  // to every window surface (herdr pane/tab, tmux window, zellij pane/tab) and
-  // sessionNameMaxLength to the Pi session name and session list. Each replaces
-  // a single fixed default (DEFAULT_MAX_WINDOW_NAME_CHARS / DEFAULT_MAX_SESSION_NAME_CHARS
-  // in naming.ts) — tightening OR relaxing it, identically for every style.
-  // These are the only two length knobs.
-  windowNameMaxLength: Type.Optional(Type.Integer({ minimum: 1 })),
-  sessionNameMaxLength: Type.Optional(Type.Integer({ minimum: 1 })),
+  titleMaxLength: Type.Integer({ minimum: 1, default: 30 }),
 });
 
 export type Config = Static<typeof ConfigSchema>;
@@ -139,6 +132,7 @@ export function loadConfig(cwd: string): Config {
     replaceExistingName: cfg.replaceExistingName,
     respectExternalRenames: cfg.respectExternalRenames,
     language: cfg.language,
+    titleMaxLength: cfg.titleMaxLength,
     surfaces: cfg.surfaces,
   });
   return cfg;

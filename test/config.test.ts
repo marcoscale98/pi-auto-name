@@ -21,8 +21,7 @@ const TOP_LEVEL_DEFAULTS: Partial<Config> = {
   skipSessionNameDedup: false,
   namingModel: "",
   language: "en",
-  windowNameMaxLength: undefined,
-  sessionNameMaxLength: undefined,
+  titleMaxLength: 30,
 };
 
 let root: string;
@@ -63,15 +62,24 @@ describe("ConfigSchema defaults", () => {
       language: "zh-CN",
       initialRenameTrigger: "first-agent-settled",
       reRenameEveryNTurns: 3,
-      sessionNameMaxLength: 50,
-      windowNameMaxLength: 25,
+      titleMaxLength: 50,
     });
     expect(cfg.namingStyle).toBe("slug");
     expect(cfg.language).toBe("zh-CN");
     expect(cfg.initialRenameTrigger).toBe("first-agent-settled");
     expect(cfg.reRenameEveryNTurns).toBe(3);
-    expect(cfg.sessionNameMaxLength).toBe(50);
-    expect(cfg.windowNameMaxLength).toBe(25);
+    expect(cfg.titleMaxLength).toBe(50);
+  });
+
+  it("accepts titleMaxLength and ignores the removed length keys", () => {
+    const cfg = validateConfig(ConfigSchema, {
+      titleMaxLength: 42,
+      windowNameMaxLength: 200,
+      sessionNameMaxLength: 300,
+    } as any);
+    expect(cfg.titleMaxLength).toBe(42);
+    expect((cfg as any).windowNameMaxLength).toBeUndefined();
+    expect((cfg as any).sessionNameMaxLength).toBeUndefined();
   });
 
   it("strips unknown keys", () => {
